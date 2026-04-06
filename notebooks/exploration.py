@@ -13,3 +13,10 @@ print(df.describe())
 
 print("\n--- Diagnostics ---")
 print(df["diagnostic"].value_counts())
+
+
+print("\n--- Patients par sexe et diagnostic ---")
+
+group = df.groupby(["sexe", "diagnostic"]).size()
+
+print(group)
