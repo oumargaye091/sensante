@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+import os
 
 # Charger le dataset
 df = pd.read_csv("data/patients_dakar.csv")
