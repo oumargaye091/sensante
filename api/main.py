@@ -6,6 +6,24 @@ from fastapi import FastAPI
 from pydantic import BaseModel, Field
 import joblib
 import numpy as np
+from fastapi.middleware.cors import CORSMiddleware
+
+
+# --- Application FastAPI ---
+app = FastAPI(
+    title="SenSante API",
+    description="Assistant pre-diagnostic medical pour le Senegal",
+    version="0.2.0"
+)
+
+# Autoriser les requêtes depuis le frontend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # En dev : tout accepter
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # --- Schemas Pydantic ---
 class PatientInput(BaseModel):
@@ -19,6 +37,7 @@ class PatientInput(BaseModel):
     maux_tete: bool = Field(..., description="Presence de maux de tete")
     region: str = Field(..., description="Region du Senegal")
 
+
 class DiagnosticOutput(BaseModel):
     """Donnees de sortie : le resultat du diagnostic."""
     diagnostic: str
@@ -26,12 +45,6 @@ class DiagnosticOutput(BaseModel):
     confiance: str
     message: str
 
-# --- Application FastAPI ---
-app = FastAPI(
-    title="SenSante API",
-    description="Assistant pre-diagnostic medical pour le Senegal",
-    version="0.2.0"
-)
 
 # --- Chargement du modele (une seule fois au demarrage) ---
 print("Chargement du modele...")
@@ -39,14 +52,17 @@ model = joblib.load("models/model.pkl")
 le_sexe = joblib.load("models/encoder_sexe.pkl")
 le_region = joblib.load("models/encoder_region.pkl")
 feature_cols = joblib.load("models/feature_cols.pkl")
+
 print(f"Modele charge : {type(model).__name__}")
 print(f"Classes : {list(model.classes_)}")
+
 
 # --- Routes ---
 @app.get("/health")
 def health_check():
     """Verification de l'etat de l'API."""
     return {"status": "ok", "message": "SenSante API is running"}
+
 
 @app.post("/predict", response_model=DiagnosticOutput)
 def predict(patient: PatientInput):
@@ -57,24 +73,31 @@ def predict(patient: PatientInput):
         sexe_enc = le_sexe.transform([patient.sexe])[0]
     except ValueError:
         return DiagnosticOutput(
-            diagnostic="erreur", probabilite=0.0,
+            diagnostic="erreur",
+            probabilite=0.0,
             confiance="aucune",
             message=f"Sexe invalide : {patient.sexe}. Utiliser M ou F."
         )
+
     try:
         region_enc = le_region.transform([patient.region])[0]
     except ValueError:
         return DiagnosticOutput(
-            diagnostic="erreur", probabilite=0.0,
+            diagnostic="erreur",
+            probabilite=0.0,
             confiance="aucune",
             message=f"Region inconnue : {patient.region}"
         )
 
     # 2. Construire le vecteur de features
     features = np.array([[
-        patient.age, sexe_enc, patient.temperature,
-        patient.tension_sys, int(patient.toux),
-        int(patient.fatigue), int(patient.maux_tete),
+        patient.age,
+        sexe_enc,
+        patient.temperature,
+        patient.tension_sys,
+        int(patient.toux),
+        int(patient.fatigue),
+        int(patient.maux_tete),
         region_enc
     ]])
 
@@ -83,9 +106,11 @@ def predict(patient: PatientInput):
     proba_max = float(model.predict_proba(features)[0].max())
 
     # 4. Niveau de confiance
-    confiance = ("haute" if proba_max >= 0.7
-                 else "moyenne" if proba_max >= 0.4
-                 else "faible")
+    confiance = (
+        "haute" if proba_max >= 0.7
+        else "moyenne" if proba_max >= 0.4
+        else "faible"
+    )
 
     # 5. Recommandation
     messages = {
