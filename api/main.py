@@ -2,12 +2,17 @@
 # SenSante API - Assistant pre-diagnostic medical
 # Lab 3 - Integration de Modeles IA - ESP/UCAD
 
-from fastapi import FastAPI
-from pydantic import BaseModel, Field
-import joblib
+import os
 import numpy as np
+import joblib
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
+from dotenv import load_dotenv
+from groq import Groq
 
+# Charger les variables d'environnement
+load_dotenv()
 
 # --- Application FastAPI ---
 app = FastAPI(
@@ -24,6 +29,30 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Client Groq (charge au demarrage)
+groq_client = None
+groq_api_key = os.getenv("GROQ_API_KEY")
+
+if groq_api_key:
+    groq_client = Groq(api_key=groq_api_key)
+    print("Client Groq initialise.")
+else:
+    print(
+        "ATTENTION : GROQ_API_KEY non trouvee. "
+        "/explain sera desactive."
+    )
+
+# --- Chargement du modele (une seule fois au demarrage) ---
+print("Chargement du modele...")
+model = joblib.load("models/model.pkl")
+le_sexe = joblib.load("models/encoder_sexe.pkl")
+le_region = joblib.load("models/encoder_region.pkl")
+feature_cols = joblib.load("models/feature_cols.pkl")
+
+print(f"Modele charge : {type(model).__name__}")
+print(f"Classes : {list(model.classes_)}")
+
 
 # --- Schemas Pydantic ---
 class PatientInput(BaseModel):
@@ -46,15 +75,42 @@ class DiagnosticOutput(BaseModel):
     message: str
 
 
-# --- Chargement du modele (une seule fois au demarrage) ---
-print("Chargement du modele...")
-model = joblib.load("models/model.pkl")
-le_sexe = joblib.load("models/encoder_sexe.pkl")
-le_region = joblib.load("models/encoder_region.pkl")
-feature_cols = joblib.load("models/feature_cols.pkl")
+class ExplainInput(BaseModel):
+    diagnostic: str = Field(
+        ...,
+        description="Diagnostic predit par le modele"
+    )
+    probabilite: float = Field(
+        ...,
+        description="Probabilite du diagnostic"
+    )
+    age: int = Field(...)
+    sexe: str = Field(...)
+    temperature: float = Field(...)
+    region: str = Field(...)
 
-print(f"Modele charge : {type(model).__name__}")
-print(f"Classes : {list(model.classes_)}")
+
+class ExplainOutput(BaseModel):
+    explication: str = Field(
+        ...,
+        description="Explication en francais"
+    )
+    modele_llm: str = Field(
+        default="llama-3.1-8b-instant",
+        description="Modele LLM utilise"
+    )
+
+
+SYSTEM_PROMPT = """Tu es un assistant medical senegalais.
+Tu recois un diagnostic et des donnees patient.
+Explique le resultat en francais simple,
+comme un medecin parlerait a son patient.
+Sois rassurant mais recommande toujours
+une consultation medicale.
+Maximum 3 phrases.
+Ne fais JAMAIS de diagnostic toi-meme.
+Tu expliques uniquement le diagnostic fourni.
+"""
 
 
 # --- Routes ---
@@ -126,4 +182,56 @@ def predict(patient: PatientInput):
         probabilite=round(proba_max, 2),
         confiance=confiance,
         message=messages.get(diagnostic, "Consultez un medecin.")
+    )
+
+
+@app.post("/explain", response_model=ExplainOutput)
+def explain(data: ExplainInput):
+    """Expliquer un diagnostic en francais avec un LLM."""
+
+    if not groq_client:
+        return ExplainOutput(
+            explication=(
+                "Service d'explication indisponible. "
+                "Cle API non configuree."
+            ),
+            modele_llm="aucun"
+        )
+
+    # Construire le prompt utilisateur
+    user_prompt = (
+        f"Patient : {data.sexe}, {data.age} ans, "
+        f"region {data.region}\n"
+        f"Temperature : {data.temperature} C\n"
+        f"Diagnostic du modele : {data.diagnostic} "
+        f"(probabilite {data.probabilite:.0%})\n"
+        f"Explique ce resultat au patient."
+    )
+
+    try:
+        response = groq_client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[
+                {
+                    "role": "system",
+                    "content": SYSTEM_PROMPT
+                },
+                {
+                    "role": "user",
+                    "content": user_prompt
+                }
+            ],
+            max_tokens=200,
+            temperature=0.3
+        )
+
+        explication = response.choices[0].message.content
+
+    except Exception as e:
+        explication = (
+            f"Erreur lors de l'appel au LLM : {str(e)}"
+        )
+
+    return ExplainOutput(
+        explication=explication
     )
