@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 venv/
 .env
+.dockerignore 
 
 # Modele ML (trop gros pour GitHub)
 models/*.pkl
