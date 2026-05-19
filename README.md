@@ -22,4 +22,4 @@ https://ODG0-sensante.hf.space
 - Docker (conteneurisation)
 
 ## Auteur
-ODG - L2 GLSI - ESP/UCAD - 2026
+Oumar Gaye - L2 GLSI_C - ESP/UCAD - 2026
