@@ -6,7 +6,7 @@ venv/
 .dockerignore 
 
 # Modele ML (trop gros pour GitHub)
-models/*.pkl
+
 
 # Fichiers OS
 .DS_Store
